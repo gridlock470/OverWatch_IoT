@@ -1,0 +1,19 @@
+name: "iot-sensor-triage-v1"
+version: "1.0.0"
+description: "An industrial simulation of an IoT microcontroller network. AI agents must diagnose offline devices, clean corrupted data streams, and manage network polling rates."
+author: "Your Team Name"
+tags: ["iot", "hardware-management", "data-cleaning", "tool-use"]
+tasks:
+  - id: "task-easy-reboot"
+    description: "Ping the network to identify an offline microcontroller and issue a remote reboot command."
+    difficulty: "easy"
+  - id: "task-medium-recalibrate"
+    description: "Read sensor logs to identify impossible hardware anomalies and issue a recalibration command to clean the data stream."
+    difficulty: "medium"
+  - id: "task-hard-failover"
+    description: "Manage a multi-node failure by rebooting dead nodes while temporarily adjusting the polling rate of adjacent nodes to prevent data loss."
+    difficulty: "hard"
+schemas:
+  observation: "Observation"
+  action: "Action"
+  reward: "Reward"
