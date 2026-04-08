@@ -10,6 +10,10 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
+def clamp_score(score):
+    # Grader strictly requires (0, 1). This forces 0.0 -> 0.01 and 1.0 -> 0.99
+    return max(0.01, min(0.99, float(score)))
+
 def run_agent(env: SensorFleetEnv, task_objective: str, task_name: str):
     print(f"[START] task={task_name}", flush=True)
     obs = env.reset()
@@ -33,14 +37,13 @@ def run_agent(env: SensorFleetEnv, task_objective: str, task_name: str):
             
             obs, reward, done, _ = env.step(action)
             
-            # Grader strictly requires: [STEP] step=1 reward=0.0
-            print(f"[STEP] step={step_num} reward={reward}", flush=True)
+            safe_reward = clamp_score(reward)
+            print(f"[STEP] step={step_num} reward={safe_reward}", flush=True)
             
             if done: 
                 break
         except Exception as e:
-            # Print a 0.0 reward step if the AI throws an error so the grader doesn't break
-            print(f"[STEP] step={step_num} reward=0.0", flush=True)
+            print(f"[STEP] step={step_num} reward=0.01", flush=True)
             break
             
     return env.state(), step_num
@@ -48,15 +51,15 @@ def run_agent(env: SensorFleetEnv, task_objective: str, task_name: str):
 if __name__ == "__main__":
     # Task 1
     state1, steps1 = run_agent(SensorFleetEnv(TASK_EASY), "Reboot Node 1, set Node 2 polling to 10.", "TASK_EASY")
-    score1 = grade_easy(state1)
+    score1 = clamp_score(grade_easy(state1))
     print(f"[END] task=TASK_EASY score={score1} steps={steps1}", flush=True)
     
     # Task 2
     state2, steps2 = run_agent(SensorFleetEnv(TASK_MEDIUM), "Node 4 is offline, Node 3 corrupted. Fix 4 then 3.", "TASK_MEDIUM")
-    score2 = grade_medium(state2)
+    score2 = clamp_score(grade_medium(state2))
     print(f"[END] task=TASK_MEDIUM score={score2} steps={steps2}", flush=True)
     
     # Task 3
     state3, steps3 = run_agent(SensorFleetEnv(TASK_HARD), "Node 5 breached. Quarantine, Reboot, then Reconnect.", "TASK_HARD")
-    score3 = grade_hard(state3)
+    score3 = clamp_score(grade_hard(state3))
     print(f"[END] task=TASK_HARD score={score3} steps={steps3}", flush=True)
