@@ -1,5 +1,4 @@
 import os
-import json
 from openai import OpenAI
 from env import SensorFleetEnv, Action
 from tasks import TASK_EASY, TASK_MEDIUM, TASK_HARD, grade_easy, grade_medium, grade_hard
@@ -11,7 +10,6 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 def clamp_score(score):
-    # Grader strictly requires (0, 1). This forces 0.0 -> 0.01 and 1.0 -> 0.99
     return max(0.01, min(0.99, float(score)))
 
 def run_agent(env: SensorFleetEnv, task_objective: str, task_name: str):
@@ -40,26 +38,23 @@ def run_agent(env: SensorFleetEnv, task_objective: str, task_name: str):
             safe_reward = clamp_score(reward)
             print(f"[STEP] step={step_num} reward={safe_reward}", flush=True)
             
-            if done: 
+            if done:
                 break
-        except Exception as e:
+        except Exception:
             print(f"[STEP] step={step_num} reward=0.01", flush=True)
             break
             
     return env.state(), step_num
 
 if __name__ == "__main__":
-    # Task 1
     state1, steps1 = run_agent(SensorFleetEnv(TASK_EASY), "Reboot Node 1, set Node 2 polling to 10.", "TASK_EASY")
     score1 = clamp_score(grade_easy(state1))
     print(f"[END] task=TASK_EASY score={score1} steps={steps1}", flush=True)
     
-    # Task 2
     state2, steps2 = run_agent(SensorFleetEnv(TASK_MEDIUM), "Node 4 is offline, Node 3 corrupted. Fix 4 then 3.", "TASK_MEDIUM")
     score2 = clamp_score(grade_medium(state2))
     print(f"[END] task=TASK_MEDIUM score={score2} steps={steps2}", flush=True)
     
-    # Task 3
     state3, steps3 = run_agent(SensorFleetEnv(TASK_HARD), "Node 5 breached. Quarantine, Reboot, then Reconnect.", "TASK_HARD")
     score3 = clamp_score(grade_hard(state3))
     print(f"[END] task=TASK_HARD score={score3} steps={steps3}", flush=True)
