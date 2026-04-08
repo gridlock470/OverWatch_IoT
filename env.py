@@ -1,100 +1,100 @@
-from typing import List, Dict, Any, Optional
+import copy
+from typing import List, Dict, Any, Literal, Optional
 from pydantic import BaseModel, Field
-from enum import Enum
 
-class NodeStatus(str, Enum):
-    HEALTHY = "healthy"
-    OFFLINE = "offline"
-    CORRUPTED = "corrupted"
-    BREACHED = "breached"
+# ==========================================
+# PYDANTIC SCHEMAS (AI Input/Output Validation)
+# ==========================================
+
+class NodeState(BaseModel):
+    id: int
+    status: str
+    data_integrity: str
+    polling_rate: int
+    # Defaults to False so it doesn't crash on Easy/Medium tasks that omit it
+    network_isolation: bool = False 
+
+class FleetState(BaseModel):
+    nodes: List[NodeState]
 
 class Action(BaseModel):
-    action_type: str = Field(..., description="reboot, recalibrate, adjust_polling, quarantine, reconnect")
-    node_id: int
-    value: Optional[float] = None
+    action_type: Literal["reboot", "recalibrate", "adjust_polling", "quarantine", "reconnect"] = Field(
+        description="The exact SRE command to execute on the node."
+    )
+    node_id: int = Field(
+        description="The ID of the sensor node to target."
+    )
+    value: Optional[int] = Field(
+        default=None, 
+        description="Numeric value for commands like adjust_polling (e.g., 10)."
+    )
 
-class Observation(BaseModel):
-    node_states: List[Dict[str, Any]]
-    last_action_status: str
-    error_logs: List[str]
+# ==========================================
+# ENVIRONMENT PHYSICS & LOGIC
+# ==========================================
 
 class SensorFleetEnv:
-    def __init__(self, task_id: str):
-        self.task_id = task_id
-        self.nodes = []
-        self.action_history = []
-        self.steps = 0
-        self.nodes = self._initialize_nodes()
+    def __init__(self, initial_state: Dict[str, Any]):
+        # Validate the raw task dictionary into a strictly typed Pydantic model
+        self.initial_state = FleetState(**initial_state)
+        # Deep copy ensures we don't accidentally corrupt the base tasks during the run
+        self.current_state = self.initial_state.model_copy(deep=True)
+        self.step_count = 0
+        self.max_steps = 6
 
-    def _get_obs(self):
-        return Observation(
-            node_states=self.nodes,
-            last_action_status="ready",
-            error_logs=[f"Node {n['id']} {n['status']}" for n in self.nodes if n["status"] != NodeStatus.HEALTHY]
-        )
+    def reset(self) -> FleetState:
+        """Resets the environment back to a clean slate."""
+        self.current_state = self.initial_state.model_copy(deep=True)
+        self.step_count = 0
+        return self.current_state
 
-    def _initialize_nodes(self):
-        nodes = []
-        for i in range(6):
-            nodes.append({
-                "id": i,
-                "status": NodeStatus.HEALTHY,
-                "data_quality": "stable",
-                "polling_rate": 5,
-                "connection": "connected",
-                "breach_timer": 0
-            })
-        if self.task_id == "TASK_EASY":
-            nodes[1]["status"] = NodeStatus.OFFLINE
-            nodes[2]["polling_rate"] = 2
-        elif self.task_id == "TASK_MEDIUM":
-            nodes[3]["status"] = NodeStatus.CORRUPTED
-            nodes[4]["status"] = NodeStatus.OFFLINE
-        elif self.task_id == "TASK_HARD":
-            nodes[5]["status"] = NodeStatus.BREACHED
-        return nodes
-
-    def reset(self):
-        self.nodes = self._initialize_nodes()
-        self.action_history = []
-        self.steps = 0
-        return self._get_obs()
+    def state(self) -> Dict[str, Any]:
+        """Returns the raw dictionary format for tasks.py to grade."""
+        return self.current_state.model_dump()
 
     def step(self, action: Action):
-        self.steps += 1
-        self.action_history.append({"node_id": action.node_id, "action_type": action.action_type})
-        node = next((n for n in self.nodes if n["id"] == action.node_id), None)
-        status = "failed"
-        if node:
-            if action.action_type == "reboot":
-                node["status"] = NodeStatus.HEALTHY
-                node["breach_timer"] = 0
-                status = "success"
-            elif action.action_type == "recalibrate":
-                if self.task_id == "TASK_MEDIUM" and self.nodes[4]["status"] == NodeStatus.OFFLINE:
-                    status = "blocked_by_dependency"
-                else:
-                    node["status"] = NodeStatus.HEALTHY
-                    node["data_quality"] = "stable"
-                    status = "success"
-            elif action.action_type == "adjust_polling":
-                node["polling_rate"] = int(action.value or 10)
-                status = "success"
-            elif action.action_type == "quarantine":
-                node["connection"] = "isolated"
-                status = "success"
-            elif action.action_type == "reconnect":
-                if node["status"] == NodeStatus.HEALTHY and node["connection"] == "isolated":
-                    node["connection"] = "connected"
-                    status = "success"
-        for n in self.nodes:
-            if n["status"] == NodeStatus.BREACHED:
-                n["breach_timer"] += 1
-                if n["breach_timer"] >= 3:
-                    n["status"] = NodeStatus.OFFLINE
-                    n["connection"] = "isolated"
-                    n["breach_timer"] = 0
-        return self._get_obs(), 0.0, self.steps >= 10, {"status": status}
+        self.step_count += 1
+        reward = 0.0
+        
+        # Safely find the target node without risking a KeyError
+        target_node = next((n for n in self.current_state.nodes if n.id == action.node_id), None)
+        
+        if not target_node:
+            # The AI hallucinated a node ID that doesn't exist. Penalize and continue.
+            return self.current_state, -0.1, self.step_count >= self.max_steps, {"error": "Node not found"}
 
-    def state(self):
-        return {"nodes": self.nodes, "action_history": self.action_history}
+        # ==========================================
+        # STATE TRANSITIONS (Strict SRE Rules)
+        # ==========================================
+        
+        if action.action_type == "reboot":
+            target_node.status = "online"
+            reward = 0.1
+            
+        elif action.action_type == "recalibrate":
+            # DEPENDENCY CHECK: Cannot fix software on offline hardware
+            if target_node.status == "online":
+                target_node.data_integrity = "clean"
+                reward = 0.1
+            else:
+                reward = -0.1 # Penalty for ignoring hardware dependencies
+                
+        elif action.action_type == "adjust_polling":
+            if action.value is not None:
+                target_node.polling_rate = action.value
+                reward = 0.1
+                
+        elif action.action_type == "quarantine":
+            target_node.network_isolation = True
+            reward = 0.1
+            
+        elif action.action_type == "reconnect":
+            # SECURITY CHECK: Connecting a breached node causes massive penalties
+            if target_node.data_integrity == "clean":
+                target_node.network_isolation = False
+                reward = 0.1
+            else:
+                reward = -0.3 # Massive penalty for risking system integrity
+
+        done = self.step_count >= self.max_steps
+        return self.current_state, reward, done, {}
